@@ -32,6 +32,8 @@ import com.google.api.client.util.DateTime;
 import com.google.api.client.util.ExponentialBackOff;
 import com.google.api.services.calendar.Calendar;
 import com.google.api.services.calendar.CalendarScopes;
+import com.google.api.services.calendar.model.CalendarList;
+import com.google.api.services.calendar.model.CalendarListEntry;
 import com.google.api.services.calendar.model.Event;
 import com.google.api.services.calendar.model.EventDateTime;
 import com.google.api.services.calendar.model.EventReminder;
@@ -60,6 +62,8 @@ public class MainActivity extends AppCompatActivity implements EasyPermissions.P
     ProgressDialog mProgress;
     private TextView mOutputText;
     private Button mCallApiButton;
+    String calendarId = null;//mCredential.getSelectedAccount().name;
+    String calendarSummary = "APP_CALENDAR";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -75,14 +79,14 @@ public class MainActivity extends AppCompatActivity implements EasyPermissions.P
                 "        \"MIDDLE_NAME\": \"SIMHA\",\n" +
                 "        \"BIRTH_DATE\": \"05-10-2001\",\n" +
                 "        \"CONTACT_NUMBER\": \"1234567890\",\n" +
-                "        \"LAST_NAME\": \"REDDY\",\n" +
+                "        \"LAST_NAME\": \"REDDY\"\n" +
                 "    }, {\n" +
                 "        \"FIRST_NAME\": \"RANJAN\",\n" +
                 "        \"WEDDING_ANNIVERSARY\": \"05-20-1994\",\n" +
                 "        \"MIDDLE_NAME\": \"JYOTI\",\n" +
                 "        \"BIRTH_DATE\": \"05-11-1994\",\n" +
                 "        \"CONTACT_NUMBER\": \"9090909090\",\n" +
-                "        \"LAST_NAME\": \"SINGH\",\n" +
+                "        \"LAST_NAME\": \"SINGH\"\n" +
                 "    }],\n" +
                 "    \"error\": \"\",\n" +
                 "    \"isSuccessful\": true,\n" +
@@ -120,32 +124,96 @@ public class MainActivity extends AppCompatActivity implements EasyPermissions.P
 
     private void setEventsToApi(List<Response> responseList) {
 
-        for (final Response resp : responseList) {
-            new AsyncTask<Void, Void, Void>() {
-                @Override
-                protected Void doInBackground(Void... voids) {
-                    String calendarId = mCredential.getSelectedAccount().name;
 
-                    HttpTransport transport = AndroidHttp.newCompatibleTransport();
-                    JsonFactory jsonFactory = JacksonFactory.getDefaultInstance();
-                    com.google.api.services.calendar.Calendar mService = new com.google.api.services.calendar.Calendar.Builder(
-                            transport, jsonFactory, mCredential)
-                            .setApplicationName(getString(R.string.app_name))
-                            .build();
+        HttpTransport transport = AndroidHttp.newCompatibleTransport();
+        JsonFactory jsonFactory = JacksonFactory.getDefaultInstance();
+        com.google.api.services.calendar.Calendar mService = new com.google.api.services.calendar.Calendar.Builder(
+                transport, jsonFactory, mCredential)
+                .setApplicationName(getString(R.string.app_name))
+                .build();
 
-                    //create birthday
-                    createBirthdayEvent(resp, calendarId, mService);
+        //check calendar and create calendar
+        createKamLmsCalendar(mService, responseList);
 
-                    //create WeddingAnniversary event
-                    if (null != resp.getWEDDINGANNIVERSARY()) {
-                        createWeddingAnnniversaryEvent(resp, calendarId, mService);
+    }
+
+    private void createKamLmsCalendar(final Calendar mService, final List<Response> responseList) {
+
+        new AsyncTask<Void, Void, Void>() {
+            @Override
+            protected Void doInBackground(Void... voids) {
+
+                String cId = getAppCalendarId(mService);
+
+                if (null == cId) {
+                    // Create a new calendar
+                    com.google.api.services.calendar.model.Calendar calendar = new com.google.api.services.calendar.model.Calendar();
+                    calendar.setSummary(calendarSummary);
+                    calendar.setTimeZone(TimeZone.getDefault().getID());
+
+                    // Insert the new calendar
+                    try {
+                        com.google.api.services.calendar.model.Calendar createdCalendar = mService.calendars().insert(calendar).execute();
+                        calendarId = createdCalendar.getId();
+                        System.out.println("createdCalendar.getId()=" + createdCalendar.getId());
+                    } catch (IOException e) {
+                        e.printStackTrace();
                     }
-
-                    return null;
                 }
-            }.execute();
-        }
+                return null;
+            }
 
+            @Override
+            protected void onPostExecute(Void aVoid) {
+                super.onPostExecute(aVoid);
+
+                for (final Response resp : responseList) {
+                    new AsyncTask<Void, Void, Void>() {
+                        @Override
+                        protected Void doInBackground(Void... voids) {
+
+                            //create birthday
+                            createBirthdayEvent(resp, calendarId, mService);
+
+                            //create WeddingAnniversary event
+                            if (null != resp.getWEDDINGANNIVERSARY()) {
+                                createWeddingAnnniversaryEvent(resp, calendarId, mService);
+                            }
+
+                            return null;
+                        }
+                    }.execute();
+                }
+            }
+        }.execute();
+
+
+    }
+
+    private String getAppCalendarId(Calendar mService) {
+        try {
+            // Iterate through entries in calendar list
+            String pageToken = null;
+            do {
+                CalendarList calendarList = mService.calendarList().list().setPageToken(pageToken).execute();
+                List<CalendarListEntry> items = calendarList.getItems();
+
+                for (CalendarListEntry calendarListEntry : items) {
+                    System.out.println("Calendars Sumary:" + calendarListEntry.getSummary());
+                    System.out.println("Calendars Id:" + calendarListEntry.getId());
+                    if (calendarListEntry.getSummary().equalsIgnoreCase(calendarSummary)) {
+                        calendarId = calendarListEntry.getId();
+                    }
+                }
+                pageToken = calendarList.getNextPageToken();
+            } while (pageToken != null);
+
+            return calendarId;
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return null;
     }
 
     private void createWeddingAnnniversaryEvent(Response resp, String calendarId, Calendar mService) {
